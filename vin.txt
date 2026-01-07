@@ -1,0 +1,55 @@
+{
+  "c:\\Users\\Administrator\\WORKING_AREA\\vin.txt": [
+    {
+      "id": "BUILTIN-152",
+      "title": "PII/Vehicle Identification Number (VIN)",
+      "description": "3 instances of sensitive data with type 'PII/Vehicle Identification Number (VIN)' were found in 'c:\\Users\\Administrator\\WORKING_AREA\\vin.txt'.",
+      "filename": "c:\\Users\\Administrator\\WORKING_AREA\\vin.txt",
+      "entityID": "c:\\Users\\Administrator\\WORKING_AREA\\vin.txt",
+      "fileRemediations": [],
+      "extraData": {
+        "classifier": "PII/Vehicle Identification Number (VIN)",
+        "severity": "LOW",
+        "matchCount": 3
+      },
+      "failedPolicyMatches": [
+        "VCS sensitive data policy"
+      ],
+      "ignoredPolicyMatches": []
+    },
+    {
+      "id": "BUILTIN-152",
+      "title": "PII/Vehicle Identification Number (VIN)",
+      "description": "3 instances of sensitive data with type 'PII/Vehicle Identification Number (VIN)' were found in 'c:\\Users\\Administrator\\WORKING_AREA\\vin.txt'.",
+      "filename": "c:\\Users\\Administrator\\WORKING_AREA\\vin.txt",
+      "entityID": "c:\\Users\\Administrator\\WORKING_AREA\\vin.txt",
+      "fileRemediations": [],
+      "extraData": {
+        "classifier": "PII/Vehicle Identification Number (VIN)",
+        "severity": "LOW",
+        "matchCount": 3
+      },
+      "failedPolicyMatches": [
+        "VCS sensitive data policy"
+      ],
+      "ignoredPolicyMatches": []
+    },
+    {
+      "id": "BUILTIN-152",
+      "title": "PII/Vehicle Identification Number (VIN)",
+      "description": "3 instances of sensitive data with type 'PII/Vehicle Identification Number (VIN)' were found in 'c:\\Users\\Administrator\\WORKING_AREA\\vin.txt'.",
+      "filename": "c:\\Users\\Administrator\\WORKING_AREA\\vin.txt",
+      "entityID": "c:\\Users\\Administrator\\WORKING_AREA\\vin.txt",
+      "fileRemediations": [],
+      "extraData": {
+        "classifier": "PII/Vehicle Identification Number (VIN)",
+        "severity": "LOW",
+        "matchCount": 3
+      },
+      "failedPolicyMatches": [
+        "VCS sensitive data policy"
+      ],
+      "ignoredPolicyMatches": []
+    }
+  ]
+}
