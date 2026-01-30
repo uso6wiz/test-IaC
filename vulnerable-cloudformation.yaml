@@ -1,0 +1,204 @@
+# CloudFormation IaC スキャンテスト用 - 意図的に脆弱な構成（本番適用禁止）
+# cfn-nag, Checkov, Snyk IaC 等で検出される想定のパターンを含む
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "IaC スキャンテスト用 - 脆弱なリソースのサンプル（デプロイしないこと）"
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: "vuln-test-bucket-public-read"
+  DBPassword:
+    Type: String
+    NoEcho: false  # ❌ パラメータを平文表示（本来は NoEcho: true）
+  ApiKey:
+    Type: String
+    Default: "sk-live-12345-hardcoded-secret"  # ❌ ハードコードされたシークレット
+
+Resources:
+  # ========== S3 脆弱性 ==========
+  VulnS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      # ❌ 暗号化なし
+      # ❌ バージョニングなし
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false       # ❌ パブリック ACL 許可
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  VulnS3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref VulnS3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"           # ❌ 全世界に公開
+            Action: "s3:GetObject"
+            Resource: !Sub "${VulnS3Bucket.Arn}/*"
+
+  # ========== セキュリティグループ脆弱性 ==========
+  VulnSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "❌ 全ポート開放のテスト用SG"
+      SecurityGroupIngress:
+        - CidrIp: "0.0.0.0/0"       # ❌ 全世界に SSH 開放
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+        - CidrIp: "0.0.0.0/0"       # ❌ RDP 開放
+          IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+        - CidrIp: "0.0.0.0/0"       # ❌ 全TCP開放
+          IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+
+  # ========== IAM 脆弱性 ==========
+  VulnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: "sts:AssumeRole"
+
+  VulnRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: OverPrivilegedPolicy
+      Roles:
+        - !Ref VulnRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: "*"              # ❌ ワイルドカードで全アクション許可
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "iam:CreateUser"
+              - "iam:AttachUserPolicy"
+              - "iam:PutUserPolicy"
+            Resource: "*"            # ❌ 権限の昇格が可能
+
+  # ========== RDS 脆弱性 ==========
+  VulnDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "test"
+      SubnetIds:
+        - !Ref PublicSubnet
+
+  VulnRDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: "vuln-test-db"
+      MasterUsername: "admin"
+      MasterUserPassword: !Ref DBPassword  # NoEcho が false のため平文になり得る
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      Engine: "mysql"
+      EngineVersion: "5.7"
+      PubliclyAccessible: true       # ❌ パブリックアクセス有効
+      # ❌ StorageEncrypted 未指定（デフォルトで暗号化なしのリージョンあり）
+      DBSubnetGroupName: !Ref VulnDBSubnetGroup
+
+  # ========== Lambda 脆弱性 ==========
+  VulnLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+
+  VulnLambdaRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LambdaFullAccess
+      Roles:
+        - !Ref VulnLambdaRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: "*"
+            Resource: "*"            # ❌ Lambda に過剰な権限
+
+  VulnLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: "vuln-lambda-with-secrets"
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt VulnLambdaRole.Arn
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return {"statusCode": 200}
+      Environment:
+        Variables:
+          API_KEY: !Ref ApiKey              # ❌ 環境変数にシークレット
+          DB_PASSWORD: !Ref DBPassword      # ❌ 平文パスワード
+          AWS_ACCESS_KEY: "AKIAIOSFODNN7EXAMPLE"  # ❌ ハードコード認証情報
+
+  # ========== EC2 / ネットワーク（VPC 簡易） ==========
+  VulnVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      EnableDnsHostnames: true
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VulnVPC
+      CidrBlock: "10.0.1.0/24"
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ""]
+
+  VulnEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: "ami-0d52744d6551d851e"  # ❌ ハードコード AMI（リージョン依存）
+      InstanceType: t3.micro
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true  # ❌ パブリックIP付与
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref VulnSecurityGroup
+          SubnetId: !Ref PublicSubnet
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          echo "DB_PASSWORD=password123" >> /etc/config  # ❌ ユーザーデータに平文パスワード
+          yum update -y
+
+  # ========== ログ・監査 ==========
+  VulnLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: "/aws/vuln-test"
+      # ❌ RetentionInDays 未設定（無期限保持でコスト・コンプライアンスリスク）
+      # ❌ KmsKeyId 未設定（ログの暗号化なし）
+
+Outputs:
+  VulnBucketName:
+    Value: !Ref VulnS3Bucket
+    Description: "脆弱なS3バケット名"
+  VulnLambdaArn:
+    Value: !GetAtt VulnLambdaFunction.Arn
+    Description: "脆弱なLambda ARN"
