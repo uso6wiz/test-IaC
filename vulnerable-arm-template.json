@@ -1,0 +1,313 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_comment": "IaC スキャンテスト用 - 意図的に脆弱な構成（本番適用禁止） Checkov, Terrascan, Snyk IaC 等で検出される想定"
+  },
+  "parameters": {
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue": "vulnteststoragepublic",
+      "metadata": { "description": "脆弱なストレージアカウント名" }
+    },
+    "adminPassword": {
+      "type": "secureString",
+      "metadata": { "description": "VM 管理者パスワード" }
+    },
+    "sqlAdminPassword": {
+      "type": "string",
+      "defaultValue": "P@ssw0rd123!",
+      "metadata": { "description": "❌ 平文デフォルトの SQL パスワード" }
+    },
+    "apiKey": {
+      "type": "string",
+      "defaultValue": "sk-live-azure-hardcoded-secret",
+      "metadata": { "description": "❌ ハードコードされたシークレット" }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    }
+  },
+  "variables": {
+    "vulnConnectionString": "Server=tcp:sqlserver;Database=db;User ID=sa;Password=P@ssw0rd123!;",
+    "vulnApiKey": "sk-prod-12345-exposed-key"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-05-01",
+      "name": "vuln-vnet",
+      "location": "[parameters('location')]",
+      "properties": {
+        "addressSpace": { "addressPrefixes": ["10.0.0.0/16"] },
+        "subnets": [{ "name": "default", "properties": { "addressPrefix": "10.0.1.0/24" } }]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-05-01",
+      "name": "vuln-nic",
+      "location": "[parameters('location')]",
+      "dependsOn": ["[resourceId('Microsoft.Network/virtualNetworks', 'vuln-vnet')]"],
+      "properties": {
+        "ipConfigurations": [{
+          "name": "ipconfig1",
+          "properties": {
+            "subnet": { "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vuln-vnet', 'default')]" },
+            "privateIPAllocationMethod": "Dynamic"
+          }
+        }]
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-09-01",
+      "name": "vuln-asp",
+      "location": "[parameters('location')]",
+      "sku": { "name": "B1", "tier": "Basic" },
+      "kind": "app",
+      "properties": { "reserved": false }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Standard_LRS", "tier": "Standard" },
+      "kind": "StorageV2",
+      "properties": {
+        "allowBlobPublicAccess": true,
+        "minimumTlsVersion": "TLS1_0",
+        "supportsHttpsTrafficOnly": false,
+        "networkAcls": {
+          "bypass": "AzureServices",
+          "defaultAction": "Allow",
+          "ipRules": []
+        },
+        "encryption": {
+          "services": { "blob": { "enabled": true }, "file": { "enabled": true } },
+          "keySource": "Microsoft.Storage"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-05-01",
+      "name": "vuln-nsg-all-open",
+      "location": "[parameters('location')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "AllowSSH",
+            "properties": {
+              "priority": 100,
+              "protocol": "Tcp",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "22"
+            }
+          },
+          {
+            "name": "AllowRDP",
+            "properties": {
+              "priority": 110,
+              "protocol": "Tcp",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "0.0.0.0/0",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "3389"
+            }
+          },
+          {
+            "name": "AllowAllInbound",
+            "properties": {
+              "priority": 120,
+              "protocol": "*",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "*"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers",
+      "apiVersion": "2023-05-01-preview",
+      "name": "vuln-sql-server-iac-test",
+      "location": "[parameters('location')]",
+      "properties": {
+        "administratorLogin": "sqladmin",
+        "administratorLoginPassword": "[parameters('sqlAdminPassword')]",
+        "version": "12.0",
+        "publicNetworkAccess": "Enabled",
+        "minimalTlsVersion": "1.0"
+      },
+      "resources": [
+        {
+          "type": "firewallRules",
+          "apiVersion": "2023-05-01-preview",
+          "name": "AllowAllAzureAndInternet",
+          "dependsOn": ["[resourceId('Microsoft.Sql/servers', 'vuln-sql-server-iac-test')]"],
+          "properties": {
+            "startIpAddress": "0.0.0.0",
+            "endIpAddress": "255.255.255.255"
+          }
+        }
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "vuln-kv-iac-test",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": { "family": "A", "name": "standard" },
+        "tenantId": "[subscription().tenantId]",
+        "enableRbacAuthorization": false,
+        "enableSoftDelete": false,
+        "networkAcls": {
+          "defaultAction": "Allow",
+          "bypass": "AzureServices",
+          "ipRules": []
+        },
+        "accessPolicies": [
+          {
+            "tenantId": "[subscription().tenantId]",
+            "objectId": "00000000-0000-0000-0000-000000000000",
+            "permissions": {
+              "secrets": ["get", "list", "set", "delete", "backup", "restore", "recover", "purge"],
+              "keys": ["get", "list", "create", "delete", "update", "encrypt", "decrypt", "sign", "verify", "wrapKey", "unwrapKey"],
+              "certificates": ["get", "list", "create", "delete", "update", "managecontacts", "getissuers", "listissuers", "setissuers", "deleteissuers", "manageissuers", "recover", "purge"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2023-09-01",
+      "name": "vuln-vm-iac-test",
+      "location": "[parameters('location')]",
+      "dependsOn": ["[resourceId('Microsoft.Network/networkInterfaces', 'vuln-nic')]"],
+      "properties": {
+        "hardwareProfile": { "vmSize": "Standard_B1s" },
+        "osProfile": {
+          "computerName": "vulnvm",
+          "adminUsername": "azureuser",
+          "adminPassword": "[parameters('adminPassword')]",
+          "windowsConfiguration": {
+            "provisionVMAgent": true,
+            "enableAutomaticUpdates": false
+          }
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2019-Datacenter",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "diskSizeGB": 128,
+            "managedDisk": { "storageAccountType": "Standard_LRS" }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [{ "id": "[resourceId('Microsoft.Network/networkInterfaces', 'vuln-nic')]", "properties": { "deleteOption": "Delete" } }]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-09-01",
+      "name": "vuln-app-iac-test",
+      "location": "[parameters('location')]",
+      "kind": "app",
+      "dependsOn": ["[resourceId('Microsoft.Web/serverfarms', 'vuln-asp')]"],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', 'vuln-asp')]",
+        "httpsOnly": false,
+        "siteConfig": {
+          "minTlsVersion": "1.0",
+          "ftpsState": "AllAllowed",
+          "http20Enabled": false,
+          "appSettings": [
+            { "name": "API_KEY", "value": "[parameters('apiKey')]" },
+            { "name": "DB_CONNECTION_STRING", "value": "[variables('vulnConnectionString')]" },
+            { "name": "SECRET_TOKEN", "value": "[variables('vulnApiKey')]" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.ContainerService/managedClusters",
+      "apiVersion": "2023-10-01",
+      "name": "vuln-aks-iac-test",
+      "location": "[parameters('location')]",
+      "properties": {
+        "dnsPrefix": "vulnaks",
+        "agentPoolProfiles": [
+          {
+            "name": "default",
+            "count": 1,
+            "vmSize": "Standard_B2s",
+            "osType": "Linux",
+            "type": "VirtualMachineScaleSets"
+          }
+        ],
+        "enableRbac": false,
+        "networkProfile": {
+          "networkPlugin": "kubenet",
+          "loadBalancerSku": "Basic"
+        },
+        "apiServerAccessProfile": {
+          "enablePrivateCluster": false
+        },
+        "addonProfiles": {
+          "omsagent": { "enabled": false }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Cache/redis",
+      "apiVersion": "2023-08-01",
+      "name": "vuln-redis-iac-test",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": { "name": "Basic", "family": "C", "capacity": 0 },
+        "enableNonSslPort": true,
+        "minimumTlsVersion": "1.0",
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts",
+      "apiVersion": "2023-09-15",
+      "name": "vuln-cosmos-iac-test",
+      "location": "[parameters('location')]",
+      "kind": "GlobalDocumentDB",
+      "properties": {
+        "databaseAccountOfferType": "Standard",
+        "publicNetworkAccess": "Enabled",
+        "enableFreeTier": true,
+        "consistencyPolicy": { "defaultConsistencyLevel": "Session" },
+        "locations": [{ "locationName": "[parameters('location')]", "failoverPriority": 0 }]
+      }
+    }
+  ],
+  "outputs": {
+    "storageAccountName": { "type": "string", "value": "[parameters('storageAccountName')]" },
+    "keyVaultName": { "type": "string", "value": "vuln-kv-iac-test" }
+  }
+}
