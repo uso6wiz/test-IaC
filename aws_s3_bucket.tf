@@ -1,3 +1,4 @@
+# 20260906 test
 resource "aws_s3_bucket" "vulnerable_bucket" {
   bucket = "my-public-bucket-example"
 }
